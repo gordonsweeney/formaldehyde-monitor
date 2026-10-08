@@ -46,7 +46,7 @@ screen in plain English.
 ## Running it
 
 1. Flash MicroPython to the K10 (Mind+ V2, Erase then Burn)
-2. Copy `main.py` to the board with Thonny
+2. Save main.py onto the board with Thonny (File → Save as → MicroPython device, named main.py
 3. Plug in the sensor and power the board; it starts on its own
 
 Controls:
