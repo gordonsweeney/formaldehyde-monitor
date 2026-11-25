@@ -12,9 +12,19 @@ firmware as it stands today, plus the data collected with it so far.
 
 - Reads formaldehyde twice per second with no averaging, and shows it in ppb
   and ppm on the K10's screen along with temperature, humidity and sensor status
-- Lets the user pick an alarm limit from published occupational standards with
-  button A, saved on the board so it survives a power cycle
-- Alarms over that limit: flashing red screen, flashing red LEDs, and a beep
+- Lets the user pick an instantaneous warning level from published occupational
+  standards with button A, saved on the board so it survives a power cycle
+- Keeps rolling 15-minute and 8-hour averages and compares them against OSHA's
+  short-term (2 ppm) and 8-hour (0.75 ppm) limits, which are defined as averages
+- Alarms three ways: a single reading over the warning level, the 15-minute
+  average over the STEL, or the 8-hour average over the TWA. Each one flashes
+  the screen, flashes the LEDs, beeps, and is logged separately
+- Warns at 80% of either exposure limit, before the limit is actually reached
+- Tracks the highest reading of the session and shows it on screen
+- Flags readings pegged at the sensor's 2000 ppb ceiling, so an average that
+  includes them can be reported honestly as a lower bound
+- Records concentration in ppb, ppm and mg/m³, since different standards use
+  different units
 - Saves one reading per second to a CSV file on the board, so a whole session
   can be graphed afterward
 - Button B drops a numbered marker in the log to label events during a test
@@ -46,7 +56,7 @@ screen in plain English.
 ## Running it
 
 1. Flash MicroPython to the K10 (Mind+ V2, Erase then Burn)
-2. Save main.py onto the board with Thonny (File → Save as → MicroPython device, named main.py
+2. Copy `main.py` to the board with Thonny
 3. Plug in the sensor and power the board; it starts on its own
 
 Controls:
@@ -61,8 +71,14 @@ Controls:
 Each run writes a new `logN.csv` on the board:
 
 ```
-elapsed_s, elapsed, status, hcho_ppb, temp_c, humidity_pct, limit_ppb, alarm, marker
+elapsed_s, elapsed, status, hcho_ppb, hcho_mg_m3, saturated, peak_ppb,
+stel_15min_ppb, twa_8hr_ppb, temp_c, humidity_pct, warn_level_ppb,
+alarm_now, alarm_stel, alarm_twa, attention, marker
 ```
+
+`saturated` is 1 when the reading sat at the sensor's 2000 ppb ceiling. Any
+average covering saturated readings is a lower bound on the true exposure and
+should be reported that way.
 
 `status` is 0 ready, 1 warming up, 2 settling, 3 read error. Every reading is
 checksum-verified; failed readings are discarded rather than logged.
@@ -88,8 +104,10 @@ work out what a wearable badge can and cannot do.
 - **The first ~90 seconds are not valid.** The sensor ramps up from near zero
   after a restart, so the code marks the first two minutes as warm-up and
   suppresses the alarm during it.
-- **Alarms compare against instantaneous readings**, while the OSHA limits are
-  averages (8 hour and 15 minute). Rolling averages are on the to-do list.
+- **The averages need a full window before they mean anything.** The 15-minute
+  average does not raise an alarm until a full 15 minutes has been collected,
+  because an average over 20 seconds is not a 15-minute average. The screen
+  shows a countdown until then.
 - **The K10's own speaker library does not work** in this firmware: its
   `play_tone` is pointed at the microphone's I2S bus and errors, and its WAV
   players accept a valid file and stay silent. The alarm writes audio to the
@@ -103,10 +121,85 @@ work out what a wearable badge can and cannot do.
 - Test against a known formaldehyde source (raw MDF, or formalin in a
   supervised lab), with a control run alongside
 - Compare readings against a calibrated reference instrument
-- Add rolling 15-minute and 8-hour averages, so readings can be compared with
-  the OSHA limits as they are actually written
 - Fit a vibration motor, so the badge can alert through touch in a noisy lab
 - Measure in a working anatomy lab
+
+## Project layout
+
+```
+main.py    the whole program; runs on the board
+data/      logs and charts from test sessions
+```
+
+One file, top to bottom, no classes and no frameworks. Section banners
+mark each part.
+
+## For students who want to work on this
+
+You do not need any experience with microcontrollers, and you do not
+need much Python. Thirteen jobs are marked in `main.py` with the word JOB,
+so you can search for it and land on each one. Every job is a short
+function with the middle missing, and the longest answer is four lines.
+
+Do them in order. Each one sets up the next.
+
+| Job | Function | What it does | Python in it |
+|---|---|---|---|
+| 1 | `ppb_to_ppm` | converts a reading to the units the legal limits use | function, `return`, division |
+| 2 | `is_over` | answers whether a reading has reached a limit | `True` / `False`, `>=` |
+| 3 | `percent_of` | how far a value is toward a limit, as a percent | `int()` |
+| 4 | `status_word` | turns a percent into OVER, MEDIUM or LOW | `if`, words in quotes |
+| 5 | `pick_color` | picks the colour the big number is shown in | `if`, names without quotes |
+| 6 | `beep_count` | how many beeps the alarm makes | `if`, numbers |
+| 7 | `is_saturated` | spots a reading pegged at the sensor's ceiling | a named constant |
+| 8 | `time_left` | the countdown while the 15-minute window fills | `max()` |
+| 9 | `highest` | tracks the worst reading of the session | comparing two values |
+| 10 | `average` | the division behind both rolling averages | guarding against divide-by-zero |
+| 11 | `ppm_to_mg` | converts to the units the WHO guideline uses | a conversion constant |
+| 12 | `alarm_message` | decides which alarm gets the top line of the screen | `if` on True/False |
+| 13 | `needs_attention` | warns at 80% of a limit, before it is reached | `or` |
+
+Jobs 1 to 6 are the gentlest. Jobs 7 to 13 are a step up and add things the
+device cannot do at all yet.
+
+Each job says what the function is for and shows what should come out for a
+handful of inputs. Working out the lines is the job. The file header has two
+worked examples, deliberately from outside this project, covering `def` and
+`return` and the shape of an `if` chain.
+
+Everything else in the file already works. The device runs as it stands;
+these change what it shows, what it records, how it sounds, and when it
+warns you. A `safe()` helper keeps it running while the jobs are still
+empty, so an unfinished job cannot stop the device.
+
+### How to contribute
+
+1. Fork this repository
+2. Open `main.py` in your fork and click the pencil icon to edit it in
+   the browser. Nothing to install.
+3. Search for `JOB`, write your lines, commit
+4. Open a pull request
+
+Claim a job in the issues tab before you start, so two people do not
+write the same one. Questions in the issue comments are welcome.
+
+### Other contributions, in rough order of difficulty
+
+- Show the battery level on screen, so a worker knows when to charge it
+- Write a summary line to the log when the device is switched off
+- Add vibration support on pin P0 (the code is there, the motor is not)
+- Write a script that reads a log CSV and plots the session
+- Handle the sensor cable being unplugged mid-run without stopping
+
+### Verifying the device after a change
+
+1. Load `main.py` onto the board with Thonny
+2. Press A until the warning level reads TEST (1 ppb); the alarm should
+   fire within a second or two: flashing screen, red LEDs, beeping
+3. Press A again to move the level back up; the alarm should clear
+4. Leave it running and watch the 15min line count down from "filling"
+   to a real number at 15:00
+5. Pull the log CSV off the board and check it has a line per second
 
 ## Credits
 
